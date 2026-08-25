@@ -112,7 +112,7 @@ export default function BCTTPage() {
               type="text" 
               value={username} 
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full p-3 bg-background/50 border border-accent rounded text-foreground outline-none focus:border-highlight transition-colors"
+              className="w-full p-3 bg-white/90 border border-accent rounded text-black outline-none focus:border-highlight transition-colors"
             />
           </div>
           <div className="mb-6">
@@ -121,7 +121,7 @@ export default function BCTTPage() {
               type="number" 
               value={age} 
               onChange={(e) => setAge(parseInt(e.target.value))}
-              className="w-full p-3 bg-background/50 border border-accent rounded text-foreground outline-none focus:border-highlight transition-colors"
+              className="w-full p-3 bg-white/90 border border-accent rounded text-black outline-none focus:border-highlight transition-colors"
             />
           </div>
           
