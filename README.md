@@ -49,6 +49,10 @@ uvicorn main:app --reload
 ```
 *The backend will automatically ingest the clinical PDFs in `backend/data/` and construct the local ChromaDB vector store on boot.*
 
+> [!TIP]
+> **Modifying the AI's Knowledge Base**
+> If you add or remove PDF documents in the `backend/data/` folder, you must delete the `backend/chroma_db_v2` directory and restart the server. This forces the system to rebuild a fresh, updated vector database.
+
 ### 2. Start the Next.js Frontend
 ```bash
 # Open a new terminal
