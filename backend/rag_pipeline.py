@@ -60,52 +60,101 @@ def extract_text_and_images_with_pymupdf(data_dir):
             
     return docs
 
-def get_vector_store_and_retriever():
+class HybridRetriever:
+    """
+    A custom Ensemble Retriever that queries a Parent-Child architecture AND a Standard Dense architecture,
+    then algorithmically deduplicates the overlapping context chunks to prevent Token Bloat.
+    """
+    def __init__(self, parent_retriever, standard_vectorstore):
+        self.parent_retriever = parent_retriever
+        self.standard_vectorstore = standard_vectorstore
+        
+    def invoke(self, query_text):
+        print("Querying Hybrid Ensemble Retriever...")
+        
+        # 1. Fetch massive, broad contextual chunks from Pipeline A
+        parent_results = self.parent_retriever.invoke(query_text)
+        top_parents = parent_results[:2]
+        
+        # 2. Fetch highly specific dense chunks from Pipeline B
+        standard_results = self.standard_vectorstore.similarity_search(query_text, k=3)
+        
+        # 3. Fast Algorithmic Deduplication Engine
+        hybrid_context = []
+        parent_texts = [p.page_content for p in top_parents]
+        
+        # Prioritize the broad parent contexts
+        hybrid_context.extend(parent_texts)
+        
+        # Only inject the dense chunks if they aren't already captured by the parents
+        for std_doc in standard_results:
+            is_duplicate = False
+            for parent_text in parent_texts:
+                if std_doc.page_content.strip() in parent_text:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                hybrid_context.append(std_doc.page_content)
+                
+        return hybrid_context
+
+def get_hybrid_retriever():
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
-    print("Building Parent-Child vector store from PyMuPDF Extractions...")
+    print("Building Hybrid RAG Vector Stores from single-pass PyMuPDF Extractions...")
     docs = extract_text_and_images_with_pymupdf(DATA_DIR)
     
-    # PHASE 3: Parent-Child Retrieval Architecture
-    vectorstore = Chroma(
+    # ---------------------------------------------------------
+    # PIPELINE A: Advanced Parent-Child Retriever
+    # ---------------------------------------------------------
+    child_vectorstore = Chroma(
         collection_name="split_parents",
         embedding_function=embeddings,
-        persist_directory=None # Ephemeral for hackathon to avoid state syncing issues
+        persist_directory=None # Ephemeral for hackathon
     )
-    
     store = InMemoryStore()
-    
     parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
     child_splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
     
-    retriever = ParentDocumentRetriever(
-        vectorstore=vectorstore,
+    parent_retriever = ParentDocumentRetriever(
+        vectorstore=child_vectorstore,
         docstore=store,
         child_splitter=child_splitter,
         parent_splitter=parent_splitter
     )
+    parent_retriever.add_documents(docs)
     
-    retriever.add_documents(docs)
-    return retriever
+    # ---------------------------------------------------------
+    # PIPELINE B: Simple Dense Retriever
+    # ---------------------------------------------------------
+    standard_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    standard_splits = standard_splitter.split_documents(docs)
+    
+    standard_vectorstore = Chroma.from_documents(
+        documents=standard_splits, 
+        embedding=embeddings, 
+        collection_name="standard_dense",
+        persist_directory=None # Ephemeral for hackathon
+    )
+    
+    return HybridRetriever(parent_retriever, standard_vectorstore)
 
 # Global retriever instance for the server lifecycle
-_retriever_instance = None
+_hybrid_retriever_instance = None
 
 def get_retriever():
-    global _retriever_instance
-    if _retriever_instance is None:
-        _retriever_instance = get_vector_store_and_retriever()
-    return _retriever_instance
+    global _hybrid_retriever_instance
+    if _hybrid_retriever_instance is None:
+        _hybrid_retriever_instance = get_hybrid_retriever()
+    return _hybrid_retriever_instance
 
 def query_rag(query_text: str, api_key: str = None):
-    """
-    Perform a similarity search on the child chunks, retrieve the parent chunks, and generate a response.
-    """
     retriever = get_retriever()
-    results = retriever.invoke(query_text)
     
-    # Retrieve full context from Parent chunks
-    context = "\n\n".join([doc.page_content for doc in results[:3]])
+    # The hybrid retriever returns a pre-deduplicated list of strings
+    context_chunks = retriever.invoke(query_text)
+    context = "\n\n---\n\n".join(context_chunks)
     
     disclaimer = "I cannot provide medical diagnoses. Please consult a healthcare provider for medical advice."
     
@@ -115,7 +164,6 @@ def query_rag(query_text: str, api_key: str = None):
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        
         model = genai.GenerativeModel('gemini-3.6-flash')
         
         prompt = f"""You are an expert medical AI assistant specializing in concussion recovery protocols.
@@ -131,7 +179,6 @@ User Question: {query_text}
 Provide a clear, structured, and empathetic answer. 
 Always end your response with this exact disclaimer: "{disclaimer}"
 """
-        
         response = model.generate_content(prompt)
         return response.text
         
@@ -139,6 +186,6 @@ Always end your response with this exact disclaimer: "{disclaimer}"
         return f"Error communicating with Gemini API: {str(e)}\n\nFallback Context:\n{context}"
 
 if __name__ == "__main__":
-    print("Setting up Advanced RAG pipeline...")
+    print("Setting up Hybrid Ensemble RAG pipeline...")
     get_retriever()
-    print("RAG setup complete.")
+    print("Hybrid RAG setup complete.")
