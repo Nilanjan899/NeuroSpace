@@ -51,7 +51,7 @@ export default function RAGPage() {
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="Enter your Gemini API Key..."
-          className="w-full p-3 bg-background/60 border border-highlight/30 rounded-xl text-foreground outline-none focus:border-highlight transition-all shadow-inner text-sm"
+          className="w-full p-3 bg-white/90 border border-highlight/30 rounded-xl text-black outline-none focus:border-highlight transition-all shadow-inner text-sm"
         />
         <p className="text-xs text-foreground/50 mt-2 text-center">Your API key is only sent directly to the backend and is never saved.</p>
       </div>
@@ -62,7 +62,7 @@ export default function RAGPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="E.g., What is the recommended cognitive pacing protocol?"
-          className="flex-1 p-4 bg-background/60 border border-highlight/50 rounded-xl text-foreground outline-none focus:border-highlight transition-all shadow-inner"
+          className="flex-1 p-4 bg-white/90 border border-highlight/50 rounded-xl text-black outline-none focus:border-highlight transition-all shadow-inner"
         />
         <button 
           onClick={handleAsk}

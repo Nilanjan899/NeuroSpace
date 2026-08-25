@@ -1,6 +1,6 @@
 <div align="center">
   <h1>🧠 NeuroSpace (NeuroPace)</h1>
-  <p><strong>A clinical-grade, AI-powered concussion recovery platform featuring automated ML eye-tracking and guardrailed medical guidance.</strong></p>
+  <p><strong>A clinical-grade, AI-powered concussion recovery platform featuring automated ML eye-tracking and an advanced Hybrid Ensemble RAG medical assistant.</strong></p>
 </div>
 
 ---
@@ -16,18 +16,31 @@ NeuroSpace democratizes these tools, bringing clinical-grade, AI-driven active c
 ### Core Features:
 1. **🏃‍♂️ BCTT Pacing Engine**: An interactive module that tracks the user's age and calculates sub-symptom heart rate thresholds based on the Buffalo Concussion Treadmill Test protocol, actively managing their physical recovery limits.
 2. **👁️ AI VOMS Eye-Tracking**: A browser-based Vestibular/Ocular Motor Screening module. Using the webcam, it tracks the user's pupil movements during "Guided Saccade" exercises, automating a test that typically requires a physical clinician.
-3. **🤖 Guardrailed Medical AI**: A sophisticated RAG (Retrieval-Augmented Generation) assistant powered by **Google Gemini 3.6 Flash**. It is strictly constrained by a vector database of official clinical consensus documents, ensuring patients receive accurate, hallucination-free protocol guidance.
+3. **🤖 Hybrid Ensemble Medical RAG**: A highly advanced AI assistant powered by **Google Gemini 3.6 Flash**. It is strictly constrained by a dual-vector database pipeline that utilizes Parent-Child semantic retrieval and fast algorithmic deduplication to ensure perfectly accurate, hallucination-free protocol guidance directly from official consensus PDFs.
+
+---
+
+## 🏗️ The Hybrid Ensemble RAG Architecture (How it Works)
+
+We moved beyond standard RAG to build an enterprise-grade hybrid retrieval pipeline that prevents token bloat and context loss. 
+
+* **PyMuPDF Layout-Aware Parsing:** The backend intelligently scans PDF blocks rather than raw text, preserving multi-column layouts commonly found in clinical research papers.
+* **Zero-Shot VLM Flowchart Extraction:** If configured, the backend renders PDF pages as high-fidelity images, passing them to Gemini Vision to dynamically extract medical algorithms and flowcharts into structured Markdown.
+* **Dual-Pipeline Deduplication:** 
+    * **Pipeline A (Parent-Child):** Groups text into 300-character sub-chunks tied to massive 1500-character parent chunks for broad context.
+    * **Pipeline B (Dense):** Groups text into standard 500-character chunks for highly-specific factual retrieval.
+    * When a user queries the AI, it queries both pipelines simultaneously and algorithmically deduplicates overlapping chunks in memory before feeding the final optimized context to the LLM.
 
 ---
 
 ## 🛠️ Technology Stack
 * **Frontend:** Next.js, React, TailwindCSS, TypeScript
 * **Backend:** FastAPI, Python, SQLite, SQLAlchemy
-* **AI & Machine Learning:** Google Gemini API, LangChain, ChromaDB, WebGazer.js (Ridge Regression ML Edge Compute)
+* **AI & Machine Learning:** Google Gemini API, LangChain, PyMuPDF, ChromaDB, WebGazer.js (Ridge Regression ML Edge Compute)
 
 ---
 
-## ⚙️ How to Run Locally
+## ⚙️ How to Install and Run Locally
 
 ### Prerequisites
 - Node.js (v18+)
@@ -44,14 +57,15 @@ venv\Scripts\activate  # On Windows
 # Install dependencies
 pip install -r requirements.txt
 
+# (Optional) Enable Advanced VLM Flowchart Extraction during boot:
+# $env:GEMINI_API_KEY="your-api-key"
+
 # Start the server
 uvicorn main:app --reload
 ```
-*The backend will automatically ingest the clinical PDFs in `backend/data/` and construct the local ChromaDB vector store on boot.*
-
 > [!TIP]
-> **Modifying the AI's Knowledge Base**
-> If you add or remove PDF documents in the `backend/data/` folder, you must delete the `backend/chroma_db_v2` directory and restart the server. This forces the system to rebuild a fresh, updated vector database.
+> **Dynamic Ephemeral Knowledge Base**
+> The backend builds the Hybrid Ensemble Vector databases entirely in memory on startup! If you add or remove clinical PDFs in the `backend/data/` folder, simply restart the FastAPI server. You do not need to manually delete any cache folders.
 
 ### 2. Start the Next.js Frontend
 ```bash
@@ -67,7 +81,7 @@ npm run dev
 
 ### 3. Usage
 Navigate to `http://localhost:3000`. 
-To use the Medical AI Assistant, paste your Gemini API key directly into the secure UI input field (it is passed directly to the backend and never saved).
+To use the Medical AI Assistant, paste your Gemini API key directly into the secure UI input field (it is passed strictly to the backend and never saved).
 
 ---
 
