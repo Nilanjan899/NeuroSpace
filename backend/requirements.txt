@@ -9,3 +9,5 @@ pypdf
 chromadb
 sentence-transformers
 google-generativeai
+pymupdf
+Pillow

@@ -1,54 +1,121 @@
 import os
-from langchain_community.document_loaders import PyPDFDirectoryLoader
+import pymupdf as fitz  # PyMuPDF
+from PIL import Image
+import io
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_classic.retrievers import ParentDocumentRetriever
+from langchain_core.stores import InMemoryStore
+from langchain_core.documents import Document
 
-# Define the persistent directory for Chroma DB
-CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(__file__), "chroma_db_v2")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
-def get_vector_store():
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    if os.path.exists(CHROMA_PERSIST_DIR):
-        print("Loading existing Chroma vector store...")
-        vectorstore = Chroma(persist_directory=CHROMA_PERSIST_DIR, embedding_function=embeddings)
+def extract_text_and_images_with_pymupdf(data_dir):
+    docs = []
+    # If a user provides an API key in the environment, we do advanced VLM extraction!
+    api_key = os.environ.get("GEMINI_API_KEY")
+    
+    if api_key:
+        print("GEMINI_API_KEY detected! Enabling Zero-Shot VLM Flowchart Extraction...")
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        vlm_model = genai.GenerativeModel('gemini-3.6-flash')
     else:
-        print("Creating new Chroma vector store from PDFs...")
-        loader = PyPDFDirectoryLoader(DATA_DIR)
-        docs = loader.load()
-        
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        splits = text_splitter.split_documents(docs)
-        
-        vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings, persist_directory=CHROMA_PERSIST_DIR)
-    
-    return vectorstore
+        vlm_model = None
 
-def setup_rag():
-    # Pre-initialize vector store
-    get_vector_store()
+    for filename in os.listdir(data_dir):
+        if not filename.endswith(".pdf"):
+            continue
+            
+        filepath = os.path.join(data_dir, filename)
+        doc = fitz.open(filepath)
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            
+            # PHASE 1: Layout-Aware Partitioning using PyMuPDF blocks
+            text_blocks = page.get_text("blocks")
+            # Filter for actual text blocks (type 0) to avoid mangling tables/images natively
+            page_text = "\n\n".join([b[4] for b in text_blocks if b[6] == 0]) 
+            
+            # PHASE 2: Zero-Shot VLM Flowchart Extraction
+            if vlm_model:
+                try:
+                    pix = page.get_pixmap(dpi=150)
+                    img = Image.open(io.BytesIO(pix.tobytes("jpeg")))
+                    
+                    prompt = "You are a data extraction tool. Convert any medical flowcharts, algorithms, or visual decision trees on this page into a strictly structured Markdown hierarchical list. If there are none, output NOTHING."
+                    response = vlm_model.generate_content([prompt, img])
+                    
+                    if response.text and response.text.strip().upper() != "NOTHING":
+                        page_text += f"\n\n### Extracted Flowchart Context:\n{response.text}\n"
+                except Exception as e:
+                    print(f"VLM extraction failed on {filename} page {page_num}: {e}")
+            
+            docs.append(Document(
+                page_content=page_text,
+                metadata={"source": filename, "page": page_num}
+            ))
+            
+    return docs
+
+def get_vector_store_and_retriever():
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
+    print("Building Parent-Child vector store from PyMuPDF Extractions...")
+    docs = extract_text_and_images_with_pymupdf(DATA_DIR)
+    
+    # PHASE 3: Parent-Child Retrieval Architecture
+    vectorstore = Chroma(
+        collection_name="split_parents",
+        embedding_function=embeddings,
+        persist_directory=None # Ephemeral for hackathon to avoid state syncing issues
+    )
+    
+    store = InMemoryStore()
+    
+    parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
+    child_splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
+    
+    retriever = ParentDocumentRetriever(
+        vectorstore=vectorstore,
+        docstore=store,
+        child_splitter=child_splitter,
+        parent_splitter=parent_splitter
+    )
+    
+    retriever.add_documents(docs)
+    return retriever
+
+# Global retriever instance for the server lifecycle
+_retriever_instance = None
+
+def get_retriever():
+    global _retriever_instance
+    if _retriever_instance is None:
+        _retriever_instance = get_vector_store_and_retriever()
+    return _retriever_instance
+
 def query_rag(query_text: str, api_key: str = None):
     """
-    Perform a similarity search on the vector store and generate a response using Gemini.
+    Perform a similarity search on the child chunks, retrieve the parent chunks, and generate a response.
     """
-    vectorstore = get_vector_store()
-    results = vectorstore.similarity_search(query_text, k=4)
+    retriever = get_retriever()
+    results = retriever.invoke(query_text)
     
-    context = "\n\n".join([doc.page_content for doc in results])
+    # Retrieve full context from Parent chunks
+    context = "\n\n".join([doc.page_content for doc in results[:3]])
     
     disclaimer = "I cannot provide medical diagnoses. Please consult a healthcare provider for medical advice."
     
     if not api_key:
-        # Fallback if no API key is provided
         return f"Context retrieved (No API Key provided for generation):\n\n{context}\n\n--- \nRemember: {disclaimer}"
 
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
         
-        # Using the standard fast lightweight model as requested
         model = genai.GenerativeModel('gemini-3.6-flash')
         
         prompt = f"""You are an expert medical AI assistant specializing in concussion recovery protocols.
@@ -72,5 +139,6 @@ Always end your response with this exact disclaimer: "{disclaimer}"
         return f"Error communicating with Gemini API: {str(e)}\n\nFallback Context:\n{context}"
 
 if __name__ == "__main__":
-    setup_rag()
+    print("Setting up Advanced RAG pipeline...")
+    get_retriever()
     print("RAG setup complete.")
